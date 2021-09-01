@@ -1,19 +1,3 @@
-/*
-Copyright 2021.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package v1alpha1
 
 import (
@@ -24,24 +8,48 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // AtlasMapSpec defines the desired state of AtlasMap
+// +k8s:openapi-gen=true
 type AtlasMapSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of AtlasMap. Edit atlasmap_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Replicas determines the desired number of running AtlasMap pods
+	Replicas int32 `json:"replicas,omitempty"`
+	// RouteHostName sets the host name to use on the Ingress or OpenShift Route
+	RouteHostName string `json:"routeHostName,omitempty"`
+	// Version sets the version of the container image used for AtlasMap
+	Version string `json:"version,omitempty"`
+	// The amount of CPU to request
+	// +kubebuilder:validation:Pattern=[0-9]+m?$
+	RequestCPU string `json:"requestCPU,omitempty"`
+	// The amount of memory to request
+	// +kubebuilder:validation:Pattern=[0-9]+([kKmMgGtTpPeE]i?)?$
+	RequestMemory string `json:"requestMemory,omitempty"`
+	// The amount of CPU to limit
+	// +kubebuilder:validation:Pattern=[0-9]+m?$
+	LimitCPU string `json:"limitCPU,omitempty"`
+	// The amount of memory to request
+	// +kubebuilder:validation:Pattern=[0-9]+([kKmMgGtTpPeE]i?)?$
+	LimitMemory string `json:"limitMemory,omitempty"`
 }
 
 // AtlasMapStatus defines the observed state of AtlasMap
+// +k8s:openapi-gen=true
 type AtlasMapStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// The URL where AtlasMap can be accessed
+	URL string `json:"URL,omitempty"`
+	// The container image that AtlasMap is using
+	Image string `json:"image,omitempty"`
+	// The current phase that the AtlasMap resource is in
+	Phase AtlasMapPhase `json:"phase,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
+// +kubebuilder:object:root=true
 
 // AtlasMap is the Schema for the atlasmaps API
+// +k8s:openapi-gen=true
+// +kubebuilder:subresource:status
+// +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas,selectorpath=.status.labelSelector
+// +kubebuilder:printcolumn:name="URL",description=AtlasMap URL,type=string,JSONPath=`.status.URL`
+// +kubebuilder:printcolumn:name="Image",description=AtlasMap image,type=string,JSONPath=`.status.image`
+// +kubebuilder:printcolumn:name="Phase",description=AtlasMap phase,type=string,JSONPath=`.status.phase`
 type AtlasMap struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -50,7 +58,7 @@ type AtlasMap struct {
 	Status AtlasMapStatus `json:"status,omitempty"`
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // AtlasMapList contains a list of AtlasMap
 type AtlasMapList struct {
@@ -58,6 +66,18 @@ type AtlasMapList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AtlasMap `json:"items"`
 }
+
+// AtlasMapPhase --
+type AtlasMapPhase string
+
+const (
+	// AtlasMapPhasePhaseUndeployed --
+	AtlasMapPhasePhaseUndeployed AtlasMapPhase = "Undeployed"
+	// AtlasMapPhasePhaseDeploying --
+	AtlasMapPhasePhaseDeploying AtlasMapPhase = "Deploying"
+	// AtlasMapPhasePhaseDeployed --
+	AtlasMapPhasePhaseDeployed AtlasMapPhase = "Deployed"
+)
 
 func init() {
 	SchemeBuilder.Register(&AtlasMap{}, &AtlasMapList{})
