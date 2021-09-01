@@ -1,0 +1,7 @@
+apiVersion: atlasmap.io.atlasmap.io/v1alpha1
+kind: AtlasMap
+metadata:
+  name: atlasmap-sample
+spec:
+  # Add fields here
+  foo: bar
