@@ -5,12 +5,11 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"k8s.io/apimachinery/pkg/util/intstr"
+	netv1 "k8s.io/api/networking/v1"
 
 	"github.com/atlasmap/atlasmap-operator/api/v1alpha1"
 	"github.com/atlasmap/atlasmap-operator/pkg/util"
 	"github.com/go-logr/logr"
-	"k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -28,7 +27,7 @@ func newIngressAction(log logr.Logger, mgr manager.Manager) action {
 }
 
 func (action *ingressAction) handle(ctx context.Context, atlasMap *v1alpha1.AtlasMap) error {
-	ingress := &v1beta1.Ingress{}
+	ingress := &netv1.Ingress{}
 
 	err := action.client.Get(ctx, types.NamespacedName{Name: atlasMap.Name, Namespace: atlasMap.Namespace}, ingress)
 	if err != nil && errors.IsNotFound(err) {
@@ -47,23 +46,28 @@ func (action *ingressAction) handle(ctx context.Context, atlasMap *v1alpha1.Atla
 	return nil
 }
 
-func createIngress(atlasMap *v1alpha1.AtlasMap) *v1beta1.Ingress {
-	return &v1beta1.Ingress{
+func createIngress(atlasMap *v1alpha1.AtlasMap) *netv1.Ingress {
+	return &netv1.Ingress{
 		TypeMeta: v1.TypeMeta{
 			Kind:       "Ingress",
-			APIVersion: v1beta1.SchemeGroupVersion.String(),
+			APIVersion: netv1.SchemeGroupVersion.String(),
 		},
 		ObjectMeta: v1.ObjectMeta{
 			Name:      atlasMap.Name,
 			Namespace: atlasMap.Namespace,
 			Labels:    atlasMapLabels(atlasMap),
 		},
-		Spec: v1beta1.IngressSpec{
-			Backend: &v1beta1.IngressBackend{
-				ServiceName: atlasMap.Name,
-				ServicePort: intstr.FromInt(portAtlasMap),
+		Spec: netv1.IngressSpec{
+			DefaultBackend: &netv1.IngressBackend{
+				Service: &netv1.IngressServiceBackend{
+					Name: atlasMap.Name,
+					Port: netv1.ServiceBackendPort{
+						Name:   "port",
+						Number: portAtlasMap,
+					},
+				},
 			},
-			Rules: []v1beta1.IngressRule{
+			Rules: []netv1.IngressRule{
 				{
 					Host: util.GetIngressHostNameFor(atlasMap),
 				},
@@ -72,7 +76,7 @@ func createIngress(atlasMap *v1alpha1.AtlasMap) *v1beta1.Ingress {
 	}
 }
 
-func reconcileIngress(ctx context.Context, ingress *v1beta1.Ingress, atlasMap *v1alpha1.AtlasMap, client client.Client) error {
+func reconcileIngress(ctx context.Context, ingress *netv1.Ingress, atlasMap *v1alpha1.AtlasMap, client client.Client) error {
 	if len(ingress.Spec.Rules) == 1 {
 		host := util.GetIngressHostNameFor(atlasMap)
 		if host != ingress.Spec.Rules[0].Host {

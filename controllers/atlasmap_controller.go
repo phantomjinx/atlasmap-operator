@@ -23,7 +23,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	configv1client "github.com/openshift/client-go/config/clientset/versioned"
 	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/api/extensions/v1beta1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -118,7 +118,7 @@ func (r *AtlasMapReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 	if isOpenShift {
 		builder.Owns(&routev1.Route{})
 	} else {
-		builder.Owns(&v1beta1.Ingress{})
+		builder.Owns(&netv1.Ingress{})
 	}
 
 	actions = newOperatorActions(ctx, log, mgr)
