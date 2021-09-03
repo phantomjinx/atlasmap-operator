@@ -1,15 +1,7 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  labels:
-    control-plane: controller-manager
-  name: system
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
-  namespace: system
+  name: atlasmap-operator
   labels:
     control-plane: controller-manager
 spec:
@@ -52,5 +44,5 @@ spec:
           requests:
             cpu: 100m
             memory: 20Mi
-      serviceAccountName: controller-manager
+      serviceAccountName: atlasmap-operator
       terminationGracePeriodSeconds: 10

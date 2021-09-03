@@ -3,7 +3,29 @@
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 0.0.1
+VERSION ?= 0.4.0
+PREVIOUS_VERSION ?= 0.3.0
+
+#
+# Versions of development and generation binaries
+#
+CONTROLLER_GEN_VERSION := v0.4.1
+OPERATOR_SDK_VERSION := v1.11.0
+KUSTOMIZE_VERSION := v4.1.2
+
+#
+# Bundle package metadata
+#
+PACKAGE := atlasmap-operator
+CSV_SUPPORT := AtlasMap
+CSV_REPLACES := $(PACKAGE).v$(PREVIOUS_VERSION)
+
+#
+# CSV manifest file location
+#
+MANIFESTS := config/manifests
+CSV_FILENAME := $(PACKAGE).clusterserviceversion.yaml
+CSV_PATH := $(MANIFESTS)/bases/$(CSV_FILENAME)
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -35,8 +57,12 @@ IMAGE_TAG_BASE ?= atlasmap.io/atlasmap-operator
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
 BUNDLE_IMG ?= $(IMAGE_TAG_BASE)-bundle:v$(VERSION)
 
+# The namespace to instal everything. Derived from currently set namespace
+NAMESPACE := $(shell ./script/namespace.sh)
+
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= docker.io/atlasmap/atlasmap-operator
+TAG ?= $(VERSION)
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
@@ -74,9 +100,14 @@ help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
+.prepare:
+	@for resource in $(shell ls config/rbac); do \
+    sed -i 's/namespace:.*/namespace: $(NAMESPACE)/' config/rbac/$${resource}; \
+  done
 
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=manager-role webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+# Note: removed generation of ClusterRole and binding to allow for editing those resources
+manifests: .prepare controller-gen ## Generate WebhookConfiguration and CustomResourceDefinition objects.
+	$(CONTROLLER_GEN) $(CRD_OPTIONS) webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
@@ -93,40 +124,71 @@ test: manifests generate fmt vet envtest ## Run tests.
 ##@ Build
 
 build: generate fmt vet ## Build manager binary.
-	go build -o bin/manager main.go
+	go build \
+	  -ldflags "-X github.com/atlasmap/atlasmap-operator/controllers/config.DefaultOperatorImage=$(IMG) -X github.com/atlasmap/atlasmap-operator/controllers/config.DefaultOperatorVersion=$(VERSION)" \
+	  -o bin/atlasmap-operator main.go
 
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./main.go
+	go run \
+	-ldflags "-X github.com/atlasmap/atlasmap-operator/controllers/config.DefaultOperatorImage=$(IMG) -X github.com/atlasmap/atlasmap-operator/controllers/config.DefaultOperatorVersion=$(VERSION)" \
+	./main.go
 
 docker-build: test ## Build docker image with the manager.
-	docker build -t ${IMG} .
+	docker build \
+	  --build-arg IMG=${IMG} \
+		--build-arg VERSION=${VERSION} \
+	  -t ${IMG}:${TAG} .
 
 docker-push: ## Push docker image with the manager.
-	docker push ${IMG}
+	docker push ${IMG}:${TAG}
 
 ##@ Deployment
 
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: manifests kustomize kubectl ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | kubectl apply -f -
 
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
+uninstall: manifests kustomize kubectl ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/crd | kubectl delete -f -
 
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+deploy: manifests kustomize kubectl ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+	@cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}:${TAG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
-undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
+undeploy: kustomize kubectl ## Undeploy controller from the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/default | kubectl delete -f -
 
+sample: kustomize kubectl
+	$(KUSTOMIZE) build config/samples | kubectl apply -f -
+
+.PHONY: kubectl controller-gen kustomize operator-sdk
+
+kubectl:
+ifeq (, $(shell which kubectl))
+	$(error "No kubectl found in PATH. Please install and re-run")
+endif
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 controller-gen: ## Download controller-gen locally if necessary.
-	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.6.1)
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION))
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 kustomize: ## Download kustomize locally if necessary.
-	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v3@v3.8.7)
+	$(call go-get-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v4@$(KUSTOMIZE_VERSION))
+
+operator-sdk:
+ifeq (, $(shell which operator-sdk))
+	@{ \
+	set -e ;\
+	curl \
+		-L https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_linux_amd64 \
+		-o operator-sdk ;\
+	chmod +x operator-sdk ;\
+	mv operator-sdk $(GOBIN)/ ;\
+	}
+OPERATOR_SDK=$(GOBIN)/operator-sdk
+else
+OPERATOR_SDK=$(shell which operator-sdk)
+endif
 
 ENVTEST = $(shell pwd)/bin/setup-envtest
 envtest: ## Download envtest-setup locally if necessary.
@@ -146,12 +208,27 @@ rm -rf $$TMP_DIR ;\
 }
 endef
 
+#
+# Tailor the manifest according to default values for this project
+# Note. to make the bundle this name must match that specified in PROJECT
+#
+pre-bundle:
+# bundle name must match that which appears in PROJECT file
+	@sed -i 's/projectName: .*/projectName: $(PACKAGE)/' PROJECT
+# finds the single CSV file and renames it
+	@find $(MANIFESTS)/bases -type f -name "*.clusterserviceversion.yaml" -execdir mv '{}' $(CSV_FILENAME) ';'
+	@sed -i 's~^    containerImage: .*~    containerImage: $(IMG):$(TAG)~' $(CSV_PATH)
+	@sed -i 's/^    support: .*/    support: $(CSV_SUPPORT)/' $(CSV_PATH)
+	@sed -i 's/^  name: .*.\(v.*\)/  name: $(PACKAGE).v$(VERSION)/' $(CSV_PATH)
+	@sed -i 's/^  replaces: .*/  replaces: $(CSV_REPLACES)/' $(CSV_PATH)
+	@sed -i 's/^  version: .*/  version: $(VERSION)/' $(CSV_PATH)
+
 .PHONY: bundle
-bundle: manifests kustomize ## Generate bundle manifests and metadata, then validate generated files.
-	operator-sdk generate kustomize manifests -q
-	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
-	$(KUSTOMIZE) build config/manifests | operator-sdk generate bundle -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
-	operator-sdk bundle validate ./bundle
+bundle: pre-bundle manifests kustomize  operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+	$(OPERATOR_SDK) generate kustomize manifests -q
+	cd config/manager && $(KUSTOMIZE) edit set image atlasmap-operator=$(IMG):$(TAG)
+	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle -q --overwrite --version $(VERSION) $(BUNDLE_METADATA_OPTS)
+	$(OPERATOR_SDK) bundle validate ./bundle
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.

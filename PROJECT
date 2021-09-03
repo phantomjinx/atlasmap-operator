@@ -11,7 +11,6 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: atlasmap.io
   group: atlasmap.io
   kind: AtlasMap
   path: github.com/atlasmap/atlasmap-operator/api/v1alpha1

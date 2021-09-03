@@ -18,6 +18,8 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	gort "runtime"
 
 	consolev1 "github.com/openshift/api/console/v1"
 	routev1 "github.com/openshift/api/route/v1"
@@ -34,22 +36,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/atlasmap/atlasmap-operator/api/v1alpha1"
-	"github.com/atlasmap/atlasmap-operator/pkg/util"
+	"github.com/atlasmap/atlasmap-operator/controllers/action"
+	"github.com/atlasmap/atlasmap-operator/controllers/config"
+	"github.com/atlasmap/atlasmap-operator/controllers/util"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // AtlasMapReconciler reconciles a AtlasMap object
 type AtlasMapReconciler struct {
-	client       client.Client
-	scheme       *runtime.Scheme
+	Client       client.Client
+	Scheme       *runtime.Scheme
 	config       *rest.Config
 	configClient *configv1client.Clientset
 }
 
-var actions []action
+var actions []action.Action
 
-//+kubebuilder:rbac:groups=atlasmap.io.atlasmap.io,resources=atlasmaps,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=atlasmap.io.atlasmap.io,resources=atlasmaps/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=atlasmap.io.atlasmap.io,resources=atlasmaps/finalizers,verbs=update
+var log = logf.Log.WithName("controller")
+
+// Note: No longer used for generating as ClusterRole and Binding resources edited manually
+//+kubebuilder:rbac:groups=atlasmap.io,resources=atlasmaps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=atlasmap.io,resources=atlasmaps/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=atlasmap.io,resources=atlasmaps/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -66,7 +74,7 @@ func (r *AtlasMapReconciler) Reconcile(ctx context.Context, request ctrl.Request
 
 	// Fetch the AtlasMap instance
 	instance := &v1alpha1.AtlasMap{}
-	err := r.client.Get(ctx, request.NamespacedName, instance)
+	err := r.Client.Get(ctx, request.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -78,7 +86,7 @@ func (r *AtlasMapReconciler) Reconcile(ctx context.Context, request ctrl.Request
 			}
 
 			isOpenShift, _ := util.IsOpenShift(r.config)
-			if isOpenShift && util.IsOpenShift43Plus(ctx, r.config) {
+			if isOpenShift && util.IsOpenShift43Plus(r.config) {
 				//Handle removal of cluster-scope object.
 				return r.removeConsoleLink(instance)
 			}
@@ -90,12 +98,12 @@ func (r *AtlasMapReconciler) Reconcile(ctx context.Context, request ctrl.Request
 	}
 
 	for _, a := range actions {
-		reqLogger.Info("Running action: " + a.getName())
-		if err := a.handle(ctx, instance); err != nil {
+		reqLogger.Info("Running action: " + a.GetName())
+		if err := a.Handle(ctx, instance); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
-			reqLogger.Error(err, "Error running action: "+a.getName())
+			reqLogger.Error(err, "Error running action: "+a.GetName())
 			return reconcile.Result{}, err
 		}
 	}
@@ -103,8 +111,17 @@ func (r *AtlasMapReconciler) Reconcile(ctx context.Context, request ctrl.Request
 	return reconcile.Result{}, nil
 }
 
+func printVersion() {
+	log.Info(fmt.Sprintf("Go Version: %s", gort.Version()))
+	log.Info(fmt.Sprintf("Go OS/Arch: %s/%s", gort.GOOS, gort.GOARCH))
+	log.Info(fmt.Sprintf("Syndesis Operator Version: %s", config.DefaultOperatorVersion))
+	log.Info(fmt.Sprintf("Syndesis Operator Image: %s", config.DefaultOperatorImage))
+}
+
 // SetupWithManager sets up the controller with the Manager.
-func (r *AtlasMapReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
+func (r *AtlasMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	printVersion()
+
 	// Create a new controller
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.AtlasMap{}).
@@ -121,7 +138,7 @@ func (r *AtlasMapReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 		builder.Owns(&netv1.Ingress{})
 	}
 
-	actions = newOperatorActions(ctx, log, mgr)
+	actions = action.NewOperatorActions(log, mgr)
 
 	return builder.Complete(r)
 }
@@ -129,13 +146,13 @@ func (r *AtlasMapReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 func (r *AtlasMapReconciler) removeConsoleLink(atlasMap *v1alpha1.AtlasMap) (request reconcile.Result, err error) {
 	consoleLinkName := util.ConsoleLinkName(atlasMap)
 	consoleLink := &consolev1.ConsoleLink{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: consoleLinkName}, consoleLink)
+	err = r.Client.Get(context.TODO(), types.NamespacedName{Name: consoleLinkName}, consoleLink)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			return reconcile.Result{}, err
 		}
 	} else {
-		err = r.client.Delete(context.TODO(), consoleLink)
+		err = r.Client.Delete(context.TODO(), consoleLink)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
